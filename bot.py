@@ -1,3 +1,4 @@
+import os
 import time
 import json
 import requests
@@ -6,8 +7,11 @@ from playwright.sync_api import sync_playwright
 # =========================
 # TELEGRAM CONFIG
 # =========================
-BOT_TOKEN = "8020019116:AAEmHUxTFROVZENc6Que_-FNPiZzCVWf98s"
-CHAT_ID = "639347587"
+# Set these as environment variables (do NOT hardcode them here).
+# Locally:   export BOT_TOKEN="..." ; export CHAT_ID="..."
+# Railway:   add them under your service's "Variables" tab.
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+CHAT_ID = os.environ["CHAT_ID"]
 
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -21,13 +25,18 @@ def send_telegram(msg):
     except Exception as e:
         print("Telegram error:", e)
 
-
 # =========================
 # FIRSTCRY CONFIG
 # =========================
 URL = "https://www.firstcry.com/search.aspx?q=hot+wheels"
 DATA_FILE = "seen.json"
 
+# Note: FirstCry's search page does not appear to accept a pincode
+# parameter to filter results by local availability/delivery. This
+# bot alerts on new listings appearing in search overall, not on
+# stock specifically at pincode 500056. If you want delivery-at-pincode
+# checks, that would need per-product page scraping (each product page
+# has a pincode-check widget) - let me know if you want that added.
 
 # =========================
 # FILTER LISTS
@@ -54,7 +63,6 @@ BIKE_KEYWORDS = [
     "kawasaki","yamaha","triumph","harley","motocompo"
 ]
 
-
 # =========================
 # STORAGE
 # =========================
@@ -62,34 +70,27 @@ def load_seen():
     try:
         with open(DATA_FILE, "r") as f:
             return json.load(f)
-    except:
+    except Exception:
         return {}
 
 def save_seen(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
-
 # =========================
 # FILTER LOGIC
 # =========================
 def is_valid_product(title: str) -> bool:
     t = title.lower()
-
     if "hot wheels" not in t:
         return False
-
     if any(x in t for x in FANTASY_KEYWORDS):
         return False
-
     if any(x in t for x in BIKE_KEYWORDS):
         return False
-
     if not any(x in t for x in REAL_BRANDS):
         return False
-
     return True
-
 
 # =========================
 # CORE CHECK
@@ -102,6 +103,7 @@ def check():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
+            channel="chromium",  # use the full Chromium build, avoid the separate headless-shell binary
             args=["--no-sandbox", "--disable-dev-shm-usage"]
         )
         page = browser.new_page()
@@ -119,16 +121,12 @@ def check():
         for a in links:
             title = a.get_attribute("title")
             href = a.get_attribute("href")
-
             if not title or not href:
                 continue
-
             if not is_valid_product(title):
                 continue
-
             if href.startswith("/"):
                 href = "https://www.firstcry.com" + href
-
             if href not in seen:
                 seen[href] = True
                 if not first_run:
@@ -145,7 +143,6 @@ def check():
         print(f"Sent {len(new_items)} new alerts")
     else:
         print("No new items found")
-
 
 # =========================
 # LOOP
