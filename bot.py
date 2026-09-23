@@ -66,12 +66,21 @@ BIKE_KEYWORDS = [
 # =========================
 # STORAGE
 # =========================
+# seen.json format: { href: {"title": ..., "in_stock": bool} }
 def load_seen():
     try:
         with open(DATA_FILE, "r") as f:
-            return json.load(f)
+            data = json.load(f)
     except Exception:
         return {}
+    # migrate old format (href: True) from before stock-tracking existed
+    migrated = {}
+    for href, val in data.items():
+        if isinstance(val, dict):
+            migrated[href] = val
+        else:
+            migrated[href] = {"title": "", "in_stock": False}
+    return migrated
 
 def save_seen(data):
     with open(DATA_FILE, "w") as f:
@@ -118,36 +127,68 @@ def check():
 
         # Pull title/href pairs out via a single JS call instead of
         # thousands of individual Python<->browser round trips - much
-        # faster, especially on limited CPU (e.g. Railway).
+        # faster, especially on limited CPU (e.g. Railway). Also grab
+        # nearby text (a few ancestor levels up) so we can heuristically
+        # detect an "out of stock" / "notify me" label on the product
+        # card, since FirstCry's search results include out-of-stock
+        # items mixed in with in-stock ones.
         raw_links = page.eval_on_selector_all(
             "a[href]",
-            "els => els.map(e => ({title: e.getAttribute('title'), href: e.getAttribute('href')}))"
+            """
+            els => els.map(e => {
+                let ctx = '';
+                let node = e;
+                for (let i = 0; i < 5 && node; i++) {
+                    node = node.parentElement;
+                    if (node) ctx += ' ' + node.innerText;
+                }
+                return {
+                    title: e.getAttribute('title'),
+                    href: e.getAttribute('href'),
+                    context: ctx.toLowerCase()
+                };
+            })
+            """
         )
         print("Total links found:", len(raw_links))
+
+        restocks = []
+        new_in_stock = []
 
         for link in raw_links:
             title = link["title"]
             href = link["href"]
+            context = link["context"]
             if not title or not href:
                 continue
             if not is_valid_product(title):
                 continue
             if href.startswith("/"):
                 href = "https://www.firstcry.com" + href
-            if href not in seen:
-                seen[href] = True
-                if not first_run:
-                    new_items.append(f"{title}\n{href}")
+
+            out_of_stock = ("out of stock" in context) or ("notify me" in context)
+            in_stock = not out_of_stock
+
+            prev = seen.get(href)
+            if prev is None:
+                seen[href] = {"title": title, "in_stock": in_stock}
+                if in_stock and not first_run:
+                    new_in_stock.append(f"{title}\n{href}")
+            else:
+                if in_stock and not prev.get("in_stock", False) and not first_run:
+                    restocks.append(f"{title}\n{href}")
+                seen[href] = {"title": title, "in_stock": in_stock}
 
         browser.close()
 
     save_seen(seen)
 
+    alerts = new_in_stock + restocks
     if first_run:
         print("Baseline saved, no alerts sent.")
-    elif new_items:
-        send_telegram("🆕 NEW Hot Wheels detected:\n\n" + "\n\n".join(new_items[:10]))
-        print(f"Sent {len(new_items)} new alerts")
+    elif alerts:
+        send_telegram("🆕 Hot Wheels IN STOCK:\n\n" + "\n\n".join(alerts[:10]))
+        print(f"Sent {len(alerts)} alerts ({len(new_in_stock)} new, {len(restocks)} restocked)")
     else:
         print("No new items found")
 
