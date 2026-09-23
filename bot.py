@@ -107,6 +107,7 @@ def check():
             args=["--no-sandbox", "--disable-dev-shm-usage"]
         )
         page = browser.new_page()
+        page.set_default_timeout(30000)  # bound all page ops so a hang errors out instead of stalling silently
         page.goto(URL, timeout=60000)
         page.wait_for_timeout(8000)
 
@@ -115,12 +116,18 @@ def check():
             page.mouse.wheel(0, 4000)
             page.wait_for_timeout(1500)
 
-        links = page.query_selector_all("a[href]")
-        print("Total links found:", len(links))
+        # Pull title/href pairs out via a single JS call instead of
+        # thousands of individual Python<->browser round trips - much
+        # faster, especially on limited CPU (e.g. Railway).
+        raw_links = page.eval_on_selector_all(
+            "a[href]",
+            "els => els.map(e => ({title: e.getAttribute('title'), href: e.getAttribute('href')}))"
+        )
+        print("Total links found:", len(raw_links))
 
-        for a in links:
-            title = a.get_attribute("title")
-            href = a.get_attribute("href")
+        for link in raw_links:
+            title = link["title"]
+            href = link["href"]
             if not title or not href:
                 continue
             if not is_valid_product(title):
