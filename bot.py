@@ -157,7 +157,7 @@ def check():
                     if (!hrefSet.has(href)) continue;
                     let ctx = '';
                     let node = e;
-                    for (let i = 0; i < 5 && node; i++) {
+                    for (let i = 0; i < 2 && node; i++) {
                         node = node.parentElement;
                         if (node) ctx += ' ' + node.innerText;
                     }
@@ -172,13 +172,16 @@ def check():
 
         restocks = []
         new_in_stock = []
+        still_out = []
 
         for c in candidates:
             href = c["href"]
             title = c["title"]
             context = stock_map.get(href, "")
-            out_of_stock = ("out of stock" in context) or ("notify me" in context)
+            out_of_stock = "out of stock" in context  # dropped "notify me" - too generic, caused false positives
             in_stock = not out_of_stock
+            if out_of_stock:
+                still_out.append(title)
 
             prev = seen.get(href)
             if prev is None:
@@ -189,6 +192,20 @@ def check():
                 if in_stock and not prev.get("in_stock", False) and not first_run:
                     restocks.append(f"{title}\n{href}")
                 seen[href] = {"title": title, "in_stock": in_stock}
+
+        if still_out:
+            print(f"Marked OUT OF STOCK this cycle ({len(still_out)}): {still_out}")
+
+        # Debug: show a snippet of captured context for a few IN-STOCK
+        # items, so we can verify (from logs alone) whether the search
+        # grid card actually shows "out of stock" text when it should,
+        # or whether the detection is missing it.
+        sample_in_stock = [c["title"] for c in candidates if not ("out of stock" in stock_map.get(c["href"], ""))][:3]
+        for t in sample_in_stock:
+            match = next((c for c in candidates if c["title"] == t), None)
+            if match:
+                snippet = stock_map.get(match["href"], "")[:150]
+                print(f"IN-STOCK sample -> {t[:50]} | context snippet: {snippet!r}")
 
         browser.close()
 
