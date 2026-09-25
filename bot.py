@@ -155,12 +155,11 @@ def check():
                     if (!href) continue;
                     if (href.startsWith('/')) href = 'https://www.firstcry.com' + href;
                     if (!hrefSet.has(href)) continue;
-                    let ctx = '';
                     let node = e;
-                    for (let i = 0; i < 2 && node; i++) {
+                    for (let i = 0; i < 4 && node.parentElement; i++) {
                         node = node.parentElement;
-                        if (node) ctx += ' ' + node.innerText;
                     }
+                    let ctx = node ? node.innerText : '';
                     result[href] = ctx.toLowerCase();
                 }
                 return result;
@@ -204,7 +203,7 @@ def check():
         for t in sample_in_stock:
             match = next((c for c in candidates if c["title"] == t), None)
             if match:
-                snippet = stock_map.get(match["href"], "")[:150]
+                snippet = stock_map.get(match["href"], "")[:300]
                 print(f"IN-STOCK sample -> {t[:50]} | context snippet: {snippet!r}")
 
         browser.close()
